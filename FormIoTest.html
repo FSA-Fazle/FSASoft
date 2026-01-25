@@ -50,17 +50,17 @@
       ]
     };
 
-    Formio.createForm(document.getElementById("formio"), formDef).then((form) => {
-      log("Form.io loaded.");
+    //Formio.createForm(document.getElementById("formio"), formDef).then((form) => {
+    //  log("Form.io loaded.");
 
       // When user submits, send the submission to BC
-      form.on("submit", (submission) => {
-        log("Submitted. Sending to AL...");
-        sendToAL({
-          event: "submit",
-          data: submission.data
-        });
-      });
+      //form.on("submit", (submission) => {
+      //  log("Submitted. Sending to AL...");
+      //  sendToAL({
+      //    event: "submit",
+      //    data: submission.data
+      //  });
+      //});
 
       // Optional: send changes as user types (can be noisy)
       // form.on("change", (chg) => {
@@ -92,5 +92,6 @@
   </script>
 </body>
 </html>
+
 
 
