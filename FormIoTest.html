@@ -49,18 +49,23 @@
         { type: "button", action: "submit", label: "Submit", theme: "primary" }
       ]
     };
-
-    //Formio.createForm(document.getElementById("formio"), formDef).then((form) => {
-    //  log("Form.io loaded.");
+      window.addEventListener("message", (event) => {
+        const data = event.data || {};
+        if (data.type === "FromAL") {
+          log("From AL: " + data.message);
+        }
+      }
+    Formio.createForm(document.getElementById("formio"), formDef).then((form) => {
+      log("Form.io loaded.");
 
       // When user submits, send the submission to BC
-      //form.on("submit", (submission) => {
-      //  log("Submitted. Sending to AL...");
-      //  sendToAL({
-      //    event: "submit",
-      //    data: submission.data
-      //  });
-      //});
+      form.on("submit", (submission) => {
+        log("Submitted. Sending to AL...");
+        sendToAL({
+          event: "submit",
+          data: submission.data
+        });
+      });
 
       // Optional: send changes as user types (can be noisy)
       // form.on("change", (chg) => {
@@ -72,18 +77,16 @@
         const data = event.data || {};
         if (data.type === "FromAL") {
           log("From AL: " + data.message);
-          //Formio.createForm(document.getElementById("formio"), data.message).then((form) => {
-          //log("Form.io loaded.");
-            
+
           // Optional: if AL sends JSON, prefill the form
-          //try {
-          //  const obj = JSON.parse(data.message);
-          //  form.submission = { data: obj };
-          //  form.redraw();
-          //  log("Prefilled form from AL JSON.");
-          //} catch (e) {
-          //  // ignore if it's not JSON
-          //}
+          try {
+            const obj = JSON.parse(data.message);
+            form.submission = { data: obj };
+            form.redraw();
+            log("Prefilled form from AL JSON.");
+          } catch (e) {
+            // ignore if it's not JSON
+          }
         }
       });
     }).catch((err) => {
@@ -92,7 +95,3 @@
   </script>
 </body>
 </html>
-
-
-
-
