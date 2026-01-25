@@ -37,12 +37,12 @@
         "*"
       );
     }
-    const something='xyz';
+    //const something='xyz';
       window.addEventListener("message", (event) => {
         const data = event.data || {};
         if (data.type === "FromAL") {
           log("From AL: " + data.message);
-           something=data.message;
+           //something=data.message;
           // Optional: if AL sends JSON, prefill the form
           //try {
           //  const obj = JSON.parse(data.message);
@@ -53,7 +53,7 @@
             //// ignore if it's not JSON
           //}
         }
-      });
+      //});
     /*
     // Build a simple form (no account needed)
     const formDef = {
@@ -85,7 +85,7 @@
       // });
 
       // Receive messages FROM AL (via startup.js bridge)
-      window.addEventListener("message", (event) => {
+      /*window.addEventListener("message", (event) => {
         const data = event.data || {};
         if (data.type === "FromAL") {
           log("From AL: " + data.message);
@@ -100,14 +100,15 @@
             // ignore if it's not JSON
           }
         }
-      });
+      });*/
     }).catch((err) => {
       log("Form.io failed to load: " + err);
     });
-    
+    });
   </script>
 </body>
 </html>
+
 
 
 
