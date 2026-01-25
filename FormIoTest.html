@@ -42,7 +42,7 @@
         const data = event.data || {};
         if (data.type === "FromAL") {
           log("From AL: " + data.message);
-           something=data;
+           something=data.message;
           // Optional: if AL sends JSON, prefill the form
           //try {
           //  const obj = JSON.parse(data.message);
@@ -108,6 +108,7 @@
   </script>
 </body>
 </html>
+
 
 
 
