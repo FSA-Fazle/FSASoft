@@ -72,7 +72,7 @@
         const data = event.data || {};
         if (data.type === "FromAL") {
           log("From AL: " + data.message);
-          Formio.createForm(document.getElementById("formio"), formDef).then((form) => {
+          Formio.createForm(document.getElementById("formio"), data.message).then((form) => {
           log("Form.io loaded.");
             
           // Optional: if AL sends JSON, prefill the form
@@ -92,4 +92,5 @@
   </script>
 </body>
 </html>
+
 
