@@ -1,6 +1,41 @@
+<!DOCTYPE html>
 <html>
-<h1>Test</h1>
+<head>
+  <meta charset="UTF-8">
+  <title>Form.io Renderer</title>
+
+  <link rel="stylesheet" href="https://cdn.form.io/formiojs/formio.full.min.css">
+  <script src="https://cdn.form.io/formiojs/formio.full.min.js"></script>
+
+  <style>
+    body { font-family: Arial; padding: 20px; }
+    #formio { min-height: 500px; }
+  </style>
+</head>
 <body>
-<script src="https://portal.form.io/manager/view/assets/lib/offline/formio.offline.min.js?base=https://api.form.io&project=https://cdagoxpbxntomcy.form.io&src=https://cdagoxpbxntomcy.form.io/casenote&libs=true"></script>
+
+<h2>Form.io Renderer</h2>
+<div id="formio"></div>
+
+<script>
+  console.log("HTML loaded");
+
+  window.addEventListener("message", function (event) {
+      if (!event.data || event.data.type !== "formio-json") return;
+
+      console.log("JSON received:", event.data.payload);
+
+      const json = JSON.parse(event.data.payload);
+      const container = document.getElementById("formio");
+
+      Formio.createForm(container, json)
+        .then(form => {
+            form.on("submit", submission => {
+                alert("Submitted: " + JSON.stringify(submission.data));
+            });
+        });
+  });
+</script>
+
 </body>
 </html>
