@@ -37,20 +37,21 @@
         "*"
       );
     }
+    const something='xyz';
       window.addEventListener("message", (event) => {
         const data = event.data || {};
         if (data.type === "FromAL") {
           log("From AL: " + data.message);
-
+           something=data;
           // Optional: if AL sends JSON, prefill the form
-          try {
-            const obj = JSON.parse(data.message);
-            form.submission = { data: obj };
-            form.redraw();
-            log("Prefilled form from AL JSON.");
-          } catch (e) {
-            // ignore if it's not JSON
-          }
+          //try {
+          //  const obj = JSON.parse(data.message);
+          //  form.submission = { data: obj };
+          //  form.redraw();
+          //  log("Prefilled form from AL JSON.");
+          //} catch (e) {
+            //// ignore if it's not JSON
+          //}
         }
       });
     /*
@@ -65,8 +66,8 @@
         { type: "button", action: "submit", label: "Submit", theme: "primary" }
       ]
     };
-
-    Formio.createForm(document.getElementById("formio"), formDef).then((form) => {
+    */
+    Formio.createForm(document.getElementById("formio"), something).then((form) => {
       log("Form.io loaded.");
 
       // When user submits, send the submission to BC
@@ -103,9 +104,10 @@
     }).catch((err) => {
       log("Form.io failed to load: " + err);
     });
-    */
+    
   </script>
 </body>
 </html>
+
 
 
