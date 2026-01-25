@@ -37,7 +37,22 @@
         "*"
       );
     }
+      window.addEventListener("message", (event) => {
+        const data = event.data || {};
+        if (data.type === "FromAL") {
+          log("From AL: " + data.message);
 
+          // Optional: if AL sends JSON, prefill the form
+          try {
+            const obj = JSON.parse(data.message);
+            form.submission = { data: obj };
+            form.redraw();
+            log("Prefilled form from AL JSON.");
+          } catch (e) {
+            // ignore if it's not JSON
+          }
+        }
+      });
     // Build a simple form (no account needed)
     const formDef = {
       display: "form",
@@ -90,3 +105,4 @@
   </script>
 </body>
 </html>
+
