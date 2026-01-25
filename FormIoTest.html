@@ -67,7 +67,7 @@
       ]
     };
     */
-    Formio.createForm(document.getElementById("formio"), something).then((form) => {
+    Formio.createForm(document.getElementById("formio"), data.message).then((form) => {
       log("Form.io loaded.");
 
       // When user submits, send the submission to BC
@@ -108,6 +108,7 @@
   </script>
 </body>
 </html>
+
 
 
 
