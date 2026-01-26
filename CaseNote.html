@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Form.io Renderer — Client Submit</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    html,body { height:100%; margin:0; font-family:Segoe UI, Roboto, Arial, sans-serif; background:#fff; color:#111; }
+    #root { box-sizing:border-box; padding:12px; height:100%; display:flex; flex-direction:column; gap:12px; }
+    #status { font-size:13px; color:#666; }
+    #error { color:#b00020; font-weight:600; display:none; }
+    #formio { flex:1; min-height:200px; border:1px solid #e6e6e6; padding:8px; overflow:auto; background:#fafafa; }
+    #controls { display:flex; gap:8px; align-items:center; }
+    button { padding:8px 12px; border-radius:4px; border:1px solid #ccc; background:#fff; cursor:pointer; }
+    pre { white-space:pre-wrap; word-break:break-word; background:#f5f5f5; padding:8px; border-radius:4px; }
+    #debug { display:none; max-height:200px; overflow:auto; }
+  </style>
+</head>
+<body>
+  <div id="root">
+    <div id="status">Waiting for JSON from parent...</div>
+    <div id="error" role="alert" aria-live="polite"></div>
+    <div id="formio" aria-live="polite"></div>
+    <div id="controls">
+      <button id="manualSubmit" type="button" style="display:none">Submit</button>
+      <div id="submitHint" style="color:#666;font-size:13px"></div>
+    </div>
+    <div id="debug"><pre id="debugPre"></pre></div>
+  </div>
+
+  <script>
+  (function () {
+    const statusEl = document.getElementById('status');
+    const errorEl = document.getElementById('error');
+    const formContainer = document.getElementById('formio');
+    const debugPre = document.getElementById('debugPre');
+    const debugBox = document.getElementById('debug');
+    const manualSubmitBtn = document.getElementById('manualSubmit');
+    const submitHint = document.getElementById('submitHint');
+
+    function setStatus(t){ statusEl.textContent = t; }
+    function showError(t){ errorEl.style.display=''; errorEl.textContent = t; }
+    function debug(t){ debugBox.style.display=''; debugPre.textContent += t + '\n'; }
+
+    const FORMIO_TOKEN = null; // set if needed
+
+    function loadScript(url) {
+      return new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = url;
+        s.async = true;
+        s.onload = () => resolve(url);
+        s.onerror = () => reject(new Error('Failed to load ' + url));
+        document.head.appendChild(s);
+      });
+    }
+
+    async function ensureFormio() {
+      if (window.Formio) return;
+      const candidates = [
+        'https://cdn.form.io/formiojs/formio.full.min.js'
+      ];
+      for (const url of candidates) {
+        try {
+          await loadScript(url);
+          if (window.Formio) return;
+        } catch (e) {
+          debug('loadScript failed: ' + url + ' -> ' + e.message);
+        }
+      }
+      throw new Error('Formio library not available. Add a local copy or allow CDN.');
+    }
+
+    function postToParent(obj) {
+      try {
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage(obj, '*');
+        }
+      } catch (e) {
+        debug('postToParent error: ' + e.message);
+      }
+    }
+
+    async function renderFormFromJson(jsonText) {
+      formContainer.innerHTML = '';
+      errorEl.style.display = 'none';
+      setStatus('Parsing JSON...');
+      let formJson;
+      try {
+        formJson = typeof jsonText === 'string' ? JSON.parse(jsonText) : jsonText;
+      } catch (e) {
+        showError('Invalid JSON: ' + e.message);
+        return;
+      }
+
+      setStatus('Loading Formio library...');
+      try {
+        await ensureFormio();
+      } catch (e) {
+        showError(e.message);
+        return;
+      }
+
+      setStatus('Creating form...');
+      try {
+        Formio.createForm(formContainer, formJson)
+          .then(form => {
+            setStatus('Form rendered. Wiring submit...');
+
+            if (FORMIO_TOKEN && typeof Formio.setToken === 'function') {
+              Formio.setToken(FORMIO_TOKEN);
+            }
+
+            // 1) Send submission JSON to parent as soon as user submits
+            form.on('submit', function(submission) {
+              try {
+                postToParent({
+                  type: 'MessageFromJs',
+                  message: JSON.stringify(submission.data)
+                });
+              } catch (e) {
+                debug('postMessage submit error: ' + e.message);
+              }
+            });
+
+            // 2) Also send final submission (after Form.io remote submit)
+            form.on('submitDone', (submission) => {
+              debug('submitDone event: ' + JSON.stringify(submission.data || {}));
+              postToParent({
+                type: 'formio-submission-success',
+                payload: submission
+              });
+            });
+
+            form.on('submitError', (err) => {
+              debug('submitError event: ' + (err && err.message ? err.message : JSON.stringify(err)));
+              postToParent({
+                type: 'formio-submission-failed',
+                error: String(err)
+              });
+              showError('Submit error: ' + (err && err.message ? err.message : String(err)));
+            });
+
+            // Defensive manual submit if native button is not usable
+            setTimeout(() => {
+              try {
+                const btn = formContainer.querySelector('button[type="submit"], button[data-component="submit"]');
+                if (btn) {
+                  debug('Found native submit button; no manual control needed.');
+                  manualSubmitBtn.style.display = 'none';
+                } else {
+                  debug('Native submit button not found; showing manual submit control.');
+                  manualSubmitBtn.style.display = '';
+                  submitHint.textContent = 'Click Submit to send data.';
+                  manualSubmitBtn.onclick = () => {
+                    setStatus('Submitting (manual)...');
+                    form.submit()
+                      .then(result => {
+                        setStatus('Submission completed.');
+                        postToParent({
+                          type: 'formio-submission-success',
+                          payload: result
+                        });
+                      })
+                      .catch(err => {
+                        setStatus('Submission failed.');
+                        showError('Submit error: ' + (err && err.message ? err.message : String(err)));
+                        postToParent({
+                          type: 'formio-submission-failed',
+                          error: String(err)
+                        });
+                      });
+                  };
+                }
+              } catch (ex) {
+                debug('defensive submit handler error: ' + ex.message);
+              }
+            }, 200);
+
+            setStatus('Form ready. Fill and submit.');
+          })
+          .catch(err => {
+            showError('Form.io createForm error: ' + (err && err.message ? err.message : String(err)));
+          });
+      } catch (err) {
+        showError('Render error: ' + err.message);
+      }
+    }
+
+    window.addEventListener('message', function (ev) {
+      try {
+        const data = ev && ev.data;
+        if (!data) return;
+
+        if (data.type === 'FromAL' && data.message) {
+          setStatus('JSON received from parent. Rendering...');
+          renderFormFromJson(data.message);
+          return;
+        }
+
+        if (data.type === 'render-json' && data.payload) {
+          setStatus('Render command received.');
+          renderFormFromJson(data.payload);
+          return;
+        }
+
+        if (data.type === 'debug' && data.payload === true) {
+          debugBox.style.display = '';
+          return;
+        }
+      } catch (e) {
+        debug('message handler error: ' + e.message);
+      }
+    }, false);
+
+    function notifyParentReady() {
+      try {
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'iframe-ready' }, '*');
+          setStatus('Ready. Waiting for JSON from parent...');
+        } else {
+          setStatus('No parent detected. Waiting for direct postMessage.');
+        }
+      } catch (e) {
+        debug('notifyParentReady error: ' + e.message);
+      }
+    }
+
+    window.__renderFormFromJson = renderFormFromJson;
+
+    window.addEventListener('error', function(e) {
+      try { debug('Global error: ' + e.message + ' @ ' + e.filename + ':' + e.lineno); } catch (ex) {}
+    });
+    window.addEventListener('unhandledrejection', function(e) {
+      try { debug('Unhandled rejection: ' + (e.reason && e.reason.message ? e.reason.message : JSON.stringify(e.reason))); } catch (ex) {}
+    });
+
+    setStatus('HTML loaded. Requesting JSON from parent...');
+    setTimeout(notifyParentReady, 50);
+  })();
+  </script>
+</body>
+</html>
