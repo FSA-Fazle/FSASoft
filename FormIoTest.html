@@ -54,7 +54,7 @@
           //}
         }
       //});
-    /*
+    
     // Build a simple form (no account needed)
     const formDef = {
       display: "form",
@@ -66,8 +66,8 @@
         { type: "button", action: "submit", label: "Submit", theme: "primary" }
       ]
     };
-    */
-    Formio.createForm(document.getElementById("formio"), data).then((form) => {
+    
+    Formio.createForm(document.getElementById("formio"), formDef).then((form) => {
       log("Form.io loaded.");
 if (data.type === "FromAL") {
           log("From AL: " + data.message);
@@ -110,6 +110,7 @@ if (data.type === "FromAL") {
   </script>
 </body>
 </html>
+
 
 
 
