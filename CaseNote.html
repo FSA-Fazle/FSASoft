@@ -191,7 +191,7 @@
       try {
         const data = ev && ev.data;
         if (!data) return;
-        
+
         if (data.type === 'FromAL' && data.message) {
           setStatus('JSON received from parent. Rendering...');
           renderFormFromJson(data.message);
