@@ -69,9 +69,9 @@
     formDef=Data;  
     Formio.createForm(document.getElementById("formio"), formDef).then((form) => {
       log("Form.io loaded.");
-//if (data.type === "FromAL") {
-//          log("From AL: " + data.message);
-//}
+if (data.type === "FromAL") {
+         log("From AL: " + formDef);
+}
       // When user submits, send the submission to BC
       form.on("submit", (submission) => {
         log("Submitted. Sending to AL...");
@@ -110,6 +110,7 @@
   </script>
 </body>
 </html>
+
 
 
 
