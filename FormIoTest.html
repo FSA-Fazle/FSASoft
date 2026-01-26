@@ -3,15 +3,12 @@
 <head>
   <meta charset="utf-8" />
   <title>Form.io Renderer (BC iframe)</title>
-
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-
   <style>
-    :root { --bg:#fff; --muted:#666; --err:#b00020; }
-    html,body { height:100%; margin:0; font-family:Segoe UI, Roboto, Arial, sans-serif; background:var(--bg); color:#111; }
+    html,body { height:100%; margin:0; font-family:Segoe UI, Roboto, Arial, sans-serif; background:#fff; color:#111; }
     #root { box-sizing:border-box; padding:12px; height:100%; display:flex; flex-direction:column; gap:12px; }
-    #status { font-size:13px; color:var(--muted); }
-    #error { color:var(--err); font-weight:600; }
+    #status { font-size:13px; color:#666; }
+    #error { color:#b00020; font-weight:600; display:none; }
     #formio { flex:1; min-height:200px; border:1px solid #e6e6e6; padding:8px; overflow:auto; background:#fafafa; }
     pre { white-space:pre-wrap; word-break:break-word; background:#f5f5f5; padding:8px; border-radius:4px; }
     button { padding:8px 12px; border-radius:4px; border:1px solid #ccc; background:#fff; cursor:pointer; }
@@ -19,163 +16,149 @@
 </head>
 <body>
   <div id="root">
-    <div id="status">Waiting for JSON from Business Central...</div>
-    <div id="error" role="alert" aria-live="polite" style="display:none"></div>
+    <div id="status">Waiting for JSON from parent...</div>
+    <div id="error" role="alert" aria-live="polite"></div>
     <div id="formio" aria-live="polite"></div>
     <div id="debug" style="display:none"><pre id="debugPre"></pre></div>
   </div>
 
   <script>
-    (function () {
-      const statusEl = document.getElementById('status');
-      const errorEl = document.getElementById('error');
-      const formContainer = document.getElementById('formio');
-      const debugPre = document.getElementById('debugPre');
+  (function () {
+    const statusEl = document.getElementById('status');
+    const errorEl = document.getElementById('error');
+    const formContainer = document.getElementById('formio');
+    const debugPre = document.getElementById('debugPre');
 
-      function logStatus(text) { statusEl.textContent = text; }
-      function showError(text) { errorEl.style.display = ''; errorEl.textContent = text; }
-      function debug(text) { debugPre.textContent += text + '\\n'; document.getElementById('debug').style.display = ''; }
+    function setStatus(t){ statusEl.textContent = t; }
+    function showError(t){ errorEl.style.display=''; errorEl.textContent = t; }
+    function debug(t){ debugPre.textContent += t + '\\n'; document.getElementById('debug').style.display=''; }
 
-      // Dynamic script loader
-      function loadScript(url) {
-        return new Promise((resolve, reject) => {
-          const s = document.createElement('script');
-          s.src = url;
-          s.async = true;
-          s.onload = () => resolve(url);
-          s.onerror = () => reject(new Error('Failed to load ' + url));
-          document.head.appendChild(s);
-        });
+    // Load script helper (tries local first, then CDN)
+    function loadScript(url){
+      return new Promise((resolve,reject)=>{
+        const s=document.createElement('script');
+        s.src=url; s.async=true;
+        s.onload=()=>resolve(url);
+        s.onerror=()=>reject(new Error('Failed to load '+url));
+        document.head.appendChild(s);
+      });
+    }
+
+    async function ensureFormio(){
+      if (window.Formio) return;
+      const candidates = [
+        // Recommended: include a local copy in the same origin as this HTML (e.g., formio.full.min.js)
+        '/formio.full.min.js',
+        // Fallback CDN (may be blocked by CSP in some BC environments)
+        'https://cdn.form.io/formiojs/formio.full.min.js'
+      ];
+      for (const url of candidates){
+        try {
+          await loadScript(url);
+          if (window.Formio) return;
+        } catch (e){
+          debug('loadScript failed: ' + url + ' -> ' + e.message);
+        }
+      }
+      throw new Error('Formio library not available. Add a local copy or allow CDN.');
+    }
+
+    // Render form JSON (string or object)
+    async function renderForm(jsonText){
+      formContainer.innerHTML=''; errorEl.style.display='none';
+      setStatus('Parsing JSON...');
+      let formJson;
+      try {
+        formJson = (typeof jsonText === 'string') ? JSON.parse(jsonText) : jsonText;
+      } catch (e){
+        showError('Invalid JSON: ' + e.message);
+        return;
       }
 
-      // Try to ensure Formio is available. Prefer same-origin local copy first.
-      async function ensureFormio() {
-        if (window.Formio) return;
-        const candidates = [
-          // local copy (recommended to include in extension resources)
-          '/formio.full.min.js',
-          // fallback CDN (may be blocked by CSP in production)
-          'https://cdn.form.io/formiojs/formio.full.min.js'
-        ];
-        for (const url of candidates) {
-          try {
-            await loadScript(url);
-            if (window.Formio) return;
-          } catch (e) {
-            debug('loadScript failed: ' + url + ' -> ' + e.message);
-          }
-        }
-        throw new Error('Formio library not available. Include a local copy (formio.full.min.js) in the extension or allow CDN.');
+      setStatus('Loading Formio library...');
+      try {
+        await ensureFormio();
+      } catch (e){
+        showError(e.message);
+        return;
       }
 
-      // Render form JSON using Formio
-      async function renderFormFromJson(jsonText) {
-        formContainer.innerHTML = '';
-        errorEl.style.display = 'none';
-        logStatus('Parsing JSON...');
-        let formJson;
-        try {
-          formJson = typeof jsonText === 'string' ? JSON.parse(jsonText) : jsonText;
-        } catch (e) {
-          showError('Invalid JSON: ' + e.message);
-          return;
-        }
-
-        logStatus('Loading Formio library...');
-        try {
-          await ensureFormio();
-        } catch (e) {
-          showError(e.message);
-          return;
-        }
-
-        logStatus('Creating form...');
-        try {
-          // Create form and wire submit back to parent
-          Formio.createForm(formContainer, formJson)
-            .then(form => {
-              logStatus('Form rendered. Waiting for submit...');
-              form.on('submit', submission => {
-                try {
-                  const payload = JSON.stringify(submission.data);
-                  // Send submission back to parent (Business Central)
-                  if (window.parent && window.parent !== window) {
-                    window.parent.postMessage({ type: 'formio-submission', payload }, '*');
-                  }
-                } catch (err) {
-                  debug('submit error: ' + err.message);
+      setStatus('Creating form...');
+      try {
+        Formio.createForm(formContainer, formJson)
+          .then(form => {
+            setStatus('Form rendered. Waiting for submit...');
+            form.on('submit', submission => {
+              try {
+                const payload = JSON.stringify(submission.data);
+                // Post submission back to parent
+                if (window.parent && window.parent !== window) {
+                  window.parent.postMessage({ type: 'MessageFromJs', message: payload }, '*');
                 }
-              });
-            })
-            .catch(err => {
-              showError('Form.io createForm error: ' + (err && err.message ? err.message : String(err)));
+              } catch (err) {
+                debug('submit error: ' + err.message);
+              }
             });
-        } catch (err) {
-          showError('Render error: ' + err.message);
-        }
+          })
+          .catch(err => {
+            showError('Form.io createForm error: ' + (err && err.message ? err.message : String(err)));
+          });
+      } catch (err){
+        showError('Render error: ' + err.message);
       }
+    }
 
-      // Message handling: accept request for JSON or direct JSON payload
-      window.addEventListener('message', function (ev) {
-        try {
-          const data = ev && ev.data;
-          if (!data) return;
+    // Message handler: accept JSON from parent (type "FromAL") or commands
+    window.addEventListener('message', function (ev) {
+      try {
+        const data = ev && ev.data;
+        if (!data) return;
 
-          // Parent requests that the iframe ask for JSON (legacy pattern)
-          if (data === 'request-json') {
-            // Notify parent we are ready to receive JSON
-            if (window.parent && window.parent !== window) {
-              window.parent.postMessage({ type: 'request-json-ready' }, '*');
-            }
-            return;
-          }
-
-          // If parent sends the JSON payload
-          if (data.type === 'formio-json' && data.payload) {
-            logStatus('JSON received from parent. Rendering...');
-            renderFormFromJson(data.payload);
-            return;
-          }
-
-          // If parent sends a direct command to render
-          if (data.type === 'render-json' && data.payload) {
-            logStatus('Render command received.');
-            renderFormFromJson(data.payload);
-            return;
-          }
-
-          // If parent sends a debug toggle
-          if (data.type === 'debug' && data.payload === true) {
-            document.getElementById('debug').style.display = '';
-            return;
-          }
-        } catch (e) {
-          debug('message handler error: ' + e.message);
+        // If parent sends the JSON payload
+        if (data.type === 'FromAL' && data.message) {
+          setStatus('JSON received from parent. Rendering...');
+          renderForm(data.message);
+          return;
         }
-      }, false);
 
-      // On load, ask parent for JSON (safe handshake)
-      function requestJsonFromParent() {
-        try {
-          if (window.parent && window.parent !== window) {
-            logStatus('Requesting JSON from parent...');
-            window.parent.postMessage('request-json', '*');
-          } else {
-            logStatus('No parent window detected. Waiting for direct postMessage.');
-          }
-        } catch (e) {
-          debug('requestJson error: ' + e.message);
+        // Optional: direct render command
+        if (data.type === 'render-json' && data.payload) {
+          setStatus('Render command received.');
+          renderForm(data.payload);
+          return;
         }
+
+        // Optional: enable debug
+        if (data.type === 'debug' && data.payload === true) {
+          document.getElementById('debug').style.display = '';
+          return;
+        }
+      } catch (e) {
+        debug('message handler error: ' + e.message);
       }
+    }, false);
 
-      // Initial ready state
-      logStatus('HTML loaded. Ready to receive JSON.');
-      // small delay to allow parent to attach listeners
-      setTimeout(requestJsonFromParent, 50);
+    // On load, notify parent that iframe is ready (so parent can send JSON)
+    function notifyParentReady(){
+      try {
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'iframe-ready' }, '*');
+          setStatus('Ready. Waiting for JSON from parent...');
+        } else {
+          setStatus('No parent detected. Waiting for direct postMessage.');
+        }
+      } catch (e) {
+        debug('notifyParentReady error: ' + e.message);
+      }
+    }
 
-      // Expose a global for debugging / direct calls if needed
-      window.__renderFormFromJson = renderFormFromJson;
-    })();
+    // Expose direct API for debugging or direct calls
+    window.__renderFormFromJson = renderForm;
+
+    // Kick off
+    setStatus('HTML loaded. Requesting JSON from parent...');
+    setTimeout(notifyParentReady, 50);
+  })();
   </script>
 </body>
 </html>
