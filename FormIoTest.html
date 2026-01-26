@@ -2,123 +2,180 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Form.io in Business Central (iframe)</title>
+  <title>Form.io Renderer (BC iframe)</title>
 
-  <!-- Form.io CSS -->
-  <link rel="stylesheet" href="https://cdn.form.io/formiojs/formio.full.min.css">
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
 
   <style>
-    body { font-family: Segoe UI, Arial, sans-serif; margin: 0; padding: 16px; }
-    h2 { margin: 0 0 12px 0; }
-    #log { margin-top: 12px; padding: 10px; border: 1px solid #ccc; background: #fafafa; min-height: 70px; font-size: 13px; white-space: pre-wrap; }
+    :root { --bg:#fff; --muted:#666; --err:#b00020; }
+    html,body { height:100%; margin:0; font-family:Segoe UI, Roboto, Arial, sans-serif; background:var(--bg); color:#111; }
+    #root { box-sizing:border-box; padding:12px; height:100%; display:flex; flex-direction:column; gap:12px; }
+    #status { font-size:13px; color:var(--muted); }
+    #error { color:var(--err); font-weight:600; }
+    #formio { flex:1; min-height:200px; border:1px solid #e6e6e6; padding:8px; overflow:auto; background:#fafafa; }
+    pre { white-space:pre-wrap; word-break:break-word; background:#f5f5f5; padding:8px; border-radius:4px; }
+    button { padding:8px 12px; border-radius:4px; border:1px solid #ccc; background:#fff; cursor:pointer; }
   </style>
-
-  <!-- Form.io JS -->
-  <script src="https://cdn.form.io/formiojs/formio.full.min.js"></script>
 </head>
-
 <body>
-  <h2>Form.io Test (running inside BC)</h2>
-
-  <div id="formio"></div>
-  <div id="log"></div>
+  <div id="root">
+    <div id="status">Waiting for JSON from Business Central...</div>
+    <div id="error" role="alert" aria-live="polite" style="display:none"></div>
+    <div id="formio" aria-live="polite"></div>
+    <div id="debug" style="display:none"><pre id="debugPre"></pre></div>
+  </div>
 
   <script>
-    function log(msg) {
-      const el = document.getElementById("log");
-      el.textContent += msg + "\n";
-    }
+    (function () {
+      const statusEl = document.getElementById('status');
+      const errorEl = document.getElementById('error');
+      const formContainer = document.getElementById('formio');
+      const debugPre = document.getElementById('debugPre');
 
-    // Send to AL via the parent bridge (startup.js)
-    function sendToAL(payload) {
-      window.parent.postMessage(
-        { type: "MessageFromJs", message: JSON.stringify(payload) },
-        "*"
-      );
-    }
-    //const something='xyz';
-      window.addEventListener("message", (event) => {
-        const data = event.data || {};
-        if (data.type === "FromAL") {
-          //log("From AL: " + data.message);
-           //something=data.message;
-          // Optional: if AL sends JSON, prefill the form
-          //try {
-          //  const obj = JSON.parse(data.message);
-          //  form.submission = { data: obj };
-          //  form.redraw();
-          //  log("Prefilled form from AL JSON.");
-          //} catch (e) {
-            //// ignore if it's not JSON
-          //}
-        }
-      //});
-    
-    // Build a simple form (no account needed)
-    const formDef = {
-      display: "form",
-      components: [
-        { type: "textfield", key: "customerNo", label: "Customer No", input: true, placeholder: "10000" },
-        { type: "number", key: "amount", label: "Amount", input: true, decimalLimit: 2 },
-        { type: "checkbox", key: "rush", label: "Rush?", input: true },
-        { type: "textarea", key: "notes", label: "Notes", input: true },
-        { type: "button", action: "submit", label: "Submit", theme: "primary" }
-      ]
-    };
-    formDef=Data;  
-    Formio.createForm(document.getElementById("formio"), formDef).then((form) => {
-      log("Form.io loaded.");
-if (data.type === "FromAL") {
-         log("From AL: " + formDef);
-}
-      // When user submits, send the submission to BC
-      form.on("submit", (submission) => {
-        log("Submitted. Sending to AL...");
-        sendToAL({
-          event: "submit",
-          data: submission.data
+      function logStatus(text) { statusEl.textContent = text; }
+      function showError(text) { errorEl.style.display = ''; errorEl.textContent = text; }
+      function debug(text) { debugPre.textContent += text + '\\n'; document.getElementById('debug').style.display = ''; }
+
+      // Dynamic script loader
+      function loadScript(url) {
+        return new Promise((resolve, reject) => {
+          const s = document.createElement('script');
+          s.src = url;
+          s.async = true;
+          s.onload = () => resolve(url);
+          s.onerror = () => reject(new Error('Failed to load ' + url));
+          document.head.appendChild(s);
         });
-      });
+      }
 
-      // Optional: send changes as user types (can be noisy)
-      // form.on("change", (chg) => {
-      //   sendToAL({ event: "change", data: form.submission?.data || {} });
-      // });
-
-      // Receive messages FROM AL (via startup.js bridge)
-      /*window.addEventListener("message", (event) => {
-        const data = event.data || {};
-        if (data.type === "FromAL") {
-          log("From AL: " + data.message);
-
-          // Optional: if AL sends JSON, prefill the form
+      // Try to ensure Formio is available. Prefer same-origin local copy first.
+      async function ensureFormio() {
+        if (window.Formio) return;
+        const candidates = [
+          // local copy (recommended to include in extension resources)
+          '/formio.full.min.js',
+          // fallback CDN (may be blocked by CSP in production)
+          'https://cdn.form.io/formiojs/formio.full.min.js'
+        ];
+        for (const url of candidates) {
           try {
-            const obj = JSON.parse(data.message);
-            form.submission = { data: obj };
-            form.redraw();
-            log("Prefilled form from AL JSON.");
+            await loadScript(url);
+            if (window.Formio) return;
           } catch (e) {
-            // ignore if it's not JSON
+            debug('loadScript failed: ' + url + ' -> ' + e.message);
           }
         }
-      });*/
-    }).catch((err) => {
-      log("Form.io failed to load: " + err);
-    });
-    });
+        throw new Error('Formio library not available. Include a local copy (formio.full.min.js) in the extension or allow CDN.');
+      }
+
+      // Render form JSON using Formio
+      async function renderFormFromJson(jsonText) {
+        formContainer.innerHTML = '';
+        errorEl.style.display = 'none';
+        logStatus('Parsing JSON...');
+        let formJson;
+        try {
+          formJson = typeof jsonText === 'string' ? JSON.parse(jsonText) : jsonText;
+        } catch (e) {
+          showError('Invalid JSON: ' + e.message);
+          return;
+        }
+
+        logStatus('Loading Formio library...');
+        try {
+          await ensureFormio();
+        } catch (e) {
+          showError(e.message);
+          return;
+        }
+
+        logStatus('Creating form...');
+        try {
+          // Create form and wire submit back to parent
+          Formio.createForm(formContainer, formJson)
+            .then(form => {
+              logStatus('Form rendered. Waiting for submit...');
+              form.on('submit', submission => {
+                try {
+                  const payload = JSON.stringify(submission.data);
+                  // Send submission back to parent (Business Central)
+                  if (window.parent && window.parent !== window) {
+                    window.parent.postMessage({ type: 'formio-submission', payload }, '*');
+                  }
+                } catch (err) {
+                  debug('submit error: ' + err.message);
+                }
+              });
+            })
+            .catch(err => {
+              showError('Form.io createForm error: ' + (err && err.message ? err.message : String(err)));
+            });
+        } catch (err) {
+          showError('Render error: ' + err.message);
+        }
+      }
+
+      // Message handling: accept request for JSON or direct JSON payload
+      window.addEventListener('message', function (ev) {
+        try {
+          const data = ev && ev.data;
+          if (!data) return;
+
+          // Parent requests that the iframe ask for JSON (legacy pattern)
+          if (data === 'request-json') {
+            // Notify parent we are ready to receive JSON
+            if (window.parent && window.parent !== window) {
+              window.parent.postMessage({ type: 'request-json-ready' }, '*');
+            }
+            return;
+          }
+
+          // If parent sends the JSON payload
+          if (data.type === 'formio-json' && data.payload) {
+            logStatus('JSON received from parent. Rendering...');
+            renderFormFromJson(data.payload);
+            return;
+          }
+
+          // If parent sends a direct command to render
+          if (data.type === 'render-json' && data.payload) {
+            logStatus('Render command received.');
+            renderFormFromJson(data.payload);
+            return;
+          }
+
+          // If parent sends a debug toggle
+          if (data.type === 'debug' && data.payload === true) {
+            document.getElementById('debug').style.display = '';
+            return;
+          }
+        } catch (e) {
+          debug('message handler error: ' + e.message);
+        }
+      }, false);
+
+      // On load, ask parent for JSON (safe handshake)
+      function requestJsonFromParent() {
+        try {
+          if (window.parent && window.parent !== window) {
+            logStatus('Requesting JSON from parent...');
+            window.parent.postMessage('request-json', '*');
+          } else {
+            logStatus('No parent window detected. Waiting for direct postMessage.');
+          }
+        } catch (e) {
+          debug('requestJson error: ' + e.message);
+        }
+      }
+
+      // Initial ready state
+      logStatus('HTML loaded. Ready to receive JSON.');
+      // small delay to allow parent to attach listeners
+      setTimeout(requestJsonFromParent, 50);
+
+      // Expose a global for debugging / direct calls if needed
+      window.__renderFormFromJson = renderFormFromJson;
+    })();
   </script>
 </body>
 </html>
-
-
-
-
-
-
-
-
-
-
-
-
