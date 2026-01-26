@@ -192,29 +192,6 @@
         const data = ev && ev.data;
         if (!data) return;
         
-// --- NEW: handle PrefillForm messages from parent --- 
-if (data.type === 'PrefillForm' && data.payload !== undefined{ 
-setStatus('Prefill message received.'); 
-let payloadObj = null; 
-try 
-{ 
-payloadObj = typeof data.payload === 'string' ? JSON.parse(data.payload) : data.payload; 
-} 
-catch (e) { 
-debug('Prefill JSON parse error: ' + e.message); 
-showError('Prefill JSON invalid: ' + e.message); 
-return; 
-} 
-
-if (currentForm) { 
-applyPrefillToForm(currentForm, payloadObj);
- } else { 
-pendingPrefill = payloadObj; 
-setStatus('Prefill queued until form is ready.'); 
-debug('Prefill queued: ' + JSON.stringify(payloadObj)); } 
-return; 
-} 
-// -------------------------------------------------------
         if (data.type === 'FromAL' && data.message) {
           setStatus('JSON received from parent. Rendering...');
           renderFormFromJson(data.message);
