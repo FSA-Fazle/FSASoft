@@ -45,7 +45,7 @@
     // CONFIG: If your form JSON includes a submission endpoint, Form.io will use it.
     // Otherwise set FORMIO_SUBMISSION_URL to the form submission endpoint (optional).
     const FORMIO_SUBMISSION_URL = 'https://cdagoxpbxntomcy.form.io/casenote/submission'; // e.g. 'https://yourproject.form.io/yourform/submission'
-    const FORMIO_TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyIjp7Il9pZCI6IjY5NDRkZTRiODM5MmE5MGY5YTA5MDIxYyJ9LCJpc3MiOiJodHRwczovL2FwaS5mb3JtLmlvIiwic3ViIjoiNjk0NGRlNGI4MzkyYTkwZjlhMDkwMjFjIiwianRpIjoiNjk3N2EzMjQwMDgwOTU2MGQwMTdkYmIyIiwiaWF0IjoxNzY5NDQ4MjI4LCJleHAiOjE4MDU3MzYyMjh9.IiqDjC96PeHEkDUL4jsO5T1ysQKk3TuOuY1sUzjE3_k'; // e.g. 'Bearer <token>' if required
+    const FORMIO_TOKEN = Null; // e.g. 'Bearer <token>' if required
 
     // Load script helper (local copy first, then CDN fallback)
     function loadScript(url) {
@@ -124,7 +124,20 @@
               debug('submitDone event: ' + JSON.stringify(submission.data || {}));
               postToParent({ type: 'formio-submission-success', payload: submission });
             });
-
+//New>
+// inside Formio.createForm(...).then(form => { ... })
+form.on('submit', function(submission) {
+  // send submission data to parent instead of letting Form.io do the XHR
+  try {
+    window.parent.postMessage({ type: 'MessageFromJs', message: submission.data }, '*');
+  } catch (e) {
+    debug('postMessage submit error: ' + e.message);
+  }
+  // prevent Form.io from doing its own remote submit if you want parent to handle it
+  // return false; // not required for Form.io events but keep logic consistent
+});
+            
+//New<
             // Capture submit errors
             form.on('submitError', (err) => {
               debug('submitError event: ' + (err && err.message ? err.message : JSON.stringify(err)));
@@ -238,4 +251,5 @@
   </script>
 </body>
 </html>
+
 
