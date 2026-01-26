@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Form.io Renderer — Client Submit</title>
+  <title>Form.io Renderer — Client Submit (fixed)</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <style>
     html,body { height:100%; margin:0; font-family:Segoe UI, Roboto, Arial, sans-serif; background:#fff; color:#111; }
@@ -40,14 +40,12 @@
 
     function setStatus(t){ statusEl.textContent = t; }
     function showError(t){ errorEl.style.display=''; errorEl.textContent = t; }
-    function debug(t){ debugBox.style.display=''; debugPre.textContent += t + '\\n'; }
+    function debug(t){ debugBox.style.display=''; debugPre.textContent += t + '\n'; }
 
-    // CONFIG: If your form JSON includes a submission endpoint, Form.io will use it.
-    // Otherwise set FORMIO_SUBMISSION_URL to the form submission endpoint (optional).
-    const FORMIO_SUBMISSION_URL = 'https://cdagoxpbxntomcy.form.io/casenote/submission'; // e.g. 'https://yourproject.form.io/yourform/submission'
-    const FORMIO_TOKEN = null; // e.g. 'Bearer <token>' if required
+    // CONFIG: optional token or submission URL (kept for compatibility)
+    const FORMIO_TOKEN = null;
 
-    // Load script helper (local copy first, then CDN fallback)
+    // Load script helper (CDN fallback)
     function loadScript(url) {
       return new Promise((resolve, reject) => {
         const s = document.createElement('script');
@@ -62,7 +60,6 @@
     async function ensureFormio() {
       if (window.Formio) return;
       const candidates = [
-        '/formio.full.min.js', // recommended: include local copy in same origin
         'https://cdn.form.io/formiojs/formio.full.min.js'
       ];
       for (const url of candidates) {
@@ -87,7 +84,59 @@
       }
     }
 
-    // Render form JSON and use Form.io built-in client submit
+    // Intercept Formio.makeRequest for submission endpoints and forward to parent
+    // This prevents cross-origin XHR from inside an iframe and lets the parent handle the network call.
+    function interceptFormioRequests() {
+      if (!window.Formio || !Formio.makeRequest) return;
+      const originalMakeRequest = Formio.makeRequest.bind(Formio);
+
+      Formio.makeRequest = function(type, url, data, opts) {
+        try {
+          // Intercept POST submissions to endpoints that include '/submission'
+          if (type && type.toLowerCase() === 'post' && url && url.toLowerCase().includes('/submission')) {
+            debug('Intercepting Form.io submission to: ' + url);
+            return new Promise((resolve, reject) => {
+              const id = 'formio-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+              let timedOut = false;
+
+              function handler(ev) {
+                try {
+                  const d = ev && ev.data;
+                  if (!d || d.type !== 'formio-response' || d.id !== id) return;
+                  window.removeEventListener('message', handler);
+                  if (timedOut) return;
+                  if (d.success) resolve(d.payload);
+                  else reject(d.error || new Error('Submission failed in parent'));
+                } catch (e) {
+                  window.removeEventListener('message', handler);
+                  reject(e);
+                }
+              }
+
+              window.addEventListener('message', handler);
+
+              // Send submission to parent for handling
+              postToParent({ type: 'formio-submit', id: id, url: url, data: data });
+
+              // Timeout fallback
+              const timeout = setTimeout(() => {
+                timedOut = true;
+                window.removeEventListener('message', handler);
+                reject(new Error('Submission timed out (no response from parent)'));
+              }, 30000);
+
+              // Note: handler will clear timeout when resolving/rejecting
+            });
+          }
+        } catch (e) {
+          debug('makeRequest intercept error: ' + e.message);
+        }
+        // Fallback to original behavior for all other requests
+        return originalMakeRequest(type, url, data, opts);
+      };
+    }
+
+    // Render form JSON and use Form.io built-in client submit (network calls intercepted)
     async function renderFormFromJson(jsonText) {
       formContainer.innerHTML = '';
       errorEl.style.display = 'none';
@@ -108,6 +157,9 @@
         return;
       }
 
+      // Intercept network calls before creating the form
+      interceptFormioRequests();
+
       setStatus('Creating form...');
       try {
         Formio.createForm(formContainer, formJson)
@@ -119,25 +171,21 @@
               Formio.setToken(FORMIO_TOKEN);
             }
 
+            // Defensive: also post submission to parent on submit event (keeps UI responsive)
+            form.on('submit', function(submission) {
+              try {
+                postToParent({ type: 'MessageFromJs', message: submission.data });
+              } catch (e) {
+                debug('postMessage submit error: ' + e.message);
+              }
+            });
+
             // When Form.io completes its normal remote save, capture the result
             form.on('submitDone', (submission) => {
               debug('submitDone event: ' + JSON.stringify(submission.data || {}));
               postToParent({ type: 'formio-submission-success', payload: submission });
             });
-//New>
-// inside Formio.createForm(...).then(form => { ... })
-form.on('submit', function(submission) {
-  // send submission data to parent instead of letting Form.io do the XHR
-  try {
-    window.parent.postMessage({ type: 'MessageFromJs', message: submission.data }, '*');
-  } catch (e) {
-    debug('postMessage submit error: ' + e.message);
-  }
-  // prevent Form.io from doing its own remote submit if you want parent to handle it
-  // return false; // not required for Form.io events but keep logic consistent
-});
-            
-//New<
+
             // Capture submit errors
             form.on('submitError', (err) => {
               debug('submitError event: ' + (err && err.message ? err.message : JSON.stringify(err)));
@@ -156,7 +204,7 @@ form.on('submit', function(submission) {
                 } else {
                   debug('Native submit button not found; showing manual submit control.');
                   manualSubmitBtn.style.display = '';
-                  submitHint.textContent = 'Click Submit to send data to Form.io server.';
+                  submitHint.textContent = 'Click Submit to send data to Form.io server (parent will handle network).';
                   manualSubmitBtn.onclick = () => {
                     setStatus('Submitting (manual)...');
                     form.submit()
@@ -209,19 +257,10 @@ form.on('submit', function(submission) {
           return;
         }
 
-        // Allow parent to set token or submission URL at runtime (optional)
-        if (data.type === 'set-submission-config') {
-          if (data.token) {
-            debug('Token set by parent.');
-            if (typeof Formio !== 'undefined' && typeof Formio.setToken === 'function') Formio.setToken(data.token);
-          }
-          if (data.submissionUrl) {
-            debug('Submission URL set by parent: ' + data.submissionUrl);
-            // Note: this example uses Form.io built-in submit; to override endpoint you must
-            // include submission settings in the form JSON or intercept submit and POST manually.
-          }
-          return;
-        }
+        // Parent can respond to our intercepted submission with a 'formio-response' message
+        // Example parent response format:
+        // { type: 'formio-response', id: '<id>', success: true, payload: { ... } }
+        // or { type: 'formio-response', id: '<id>', success: false, error: '...' }
       } catch (e) {
         debug('message handler error: ' + e.message);
       }
@@ -244,6 +283,14 @@ form.on('submit', function(submission) {
     // Expose API for debugging
     window.__renderFormFromJson = renderFormFromJson;
 
+    // Global error handlers to capture issues inside iframe
+    window.addEventListener('error', function(e) {
+      try { debug('Global error: ' + e.message + ' @ ' + e.filename + ':' + e.lineno); } catch (ex) {}
+    });
+    window.addEventListener('unhandledrejection', function(e) {
+      try { debug('Unhandled rejection: ' + (e.reason && e.reason.message ? e.reason.message : JSON.stringify(e.reason))); } catch (ex) {}
+    });
+
     // Start
     setStatus('HTML loaded. Requesting JSON from parent...');
     setTimeout(notifyParentReady, 50);
@@ -251,6 +298,3 @@ form.on('submit', function(submission) {
   </script>
 </body>
 </html>
-
-
-
