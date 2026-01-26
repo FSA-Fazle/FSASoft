@@ -209,6 +209,24 @@
       } catch (err) {
         showError('Render error: ' + err.message);
       }
+      form.on('submit', submission => {
+  const data = submission.data || {};
+  const url = 'https://yourproject.form.io/yourform/submission';
+  const token = null; // or 'Bearer ...'
+  fetch(url, {
+    method: 'POST',
+    headers: Object.assign({ 'Content-Type': 'application/json' }, token ? { Authorization: token } : {}),
+    body: JSON.stringify({ data })
+  })
+  .then(r => r.json())
+  .then(result => {
+    window.parent.postMessage({ type: 'formio-submission-success', payload: result }, '*');
+  })
+  .catch(err => {
+    window.parent.postMessage({ type: 'formio-submission-failed', error: String(err), payload: data }, '*');
+  });
+});
+
     }
 
     // Message handling: accept JSON from parent (type "FromAL") or commands
@@ -277,5 +295,6 @@
   </script>
 </body>
 </html>
+
 
 
