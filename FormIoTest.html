@@ -4,7 +4,6 @@
   <meta charset="utf-8" />
   <title>Form.io Renderer — Client Submit</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <link rel="stylesheet" href="https://cdn.form.io/js/formio.form.min.css">
   <style>
     html,body { height:100%; margin:0; font-family:Segoe UI, Roboto, Arial, sans-serif; background:#fff; color:#111; }
     #root { box-sizing:border-box; padding:12px; height:100%; display:flex; flex-direction:column; gap:12px; }
@@ -219,4 +218,23 @@
     function notifyParentReady() {
       try {
         if (window.parent && window.parent !== window) {
-          window.parent.post
+          window.parent.postMessage({ type: 'iframe-ready' }, '*');
+          setStatus('Ready. Waiting for JSON from parent...');
+        } else {
+          setStatus('No parent detected. Waiting for direct postMessage.');
+        }
+      } catch (e) {
+        debug('notifyParentReady error: ' + e.message);
+      }
+    }
+
+    // Expose API for debugging
+    window.__renderFormFromJson = renderFormFromJson;
+
+    // Start
+    setStatus('HTML loaded. Requesting JSON from parent...');
+    setTimeout(notifyParentReady, 50);
+  })();
+  </script>
+</body>
+</html>
