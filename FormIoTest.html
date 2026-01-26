@@ -45,7 +45,7 @@
     // CONFIG: If your form JSON includes a submission endpoint, Form.io will use it.
     // Otherwise set FORMIO_SUBMISSION_URL to the form submission endpoint (optional).
     const FORMIO_SUBMISSION_URL = 'https://cdagoxpbxntomcy.form.io/casenote/submission'; // e.g. 'https://yourproject.form.io/yourform/submission'
-    const FORMIO_TOKEN = Null; // e.g. 'Bearer <token>' if required
+    const FORMIO_TOKEN = null; // e.g. 'Bearer <token>' if required
 
     // Load script helper (local copy first, then CDN fallback)
     function loadScript(url) {
@@ -251,5 +251,6 @@ form.on('submit', function(submission) {
   </script>
 </body>
 </html>
+
 
 
