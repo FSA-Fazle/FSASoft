@@ -2,18 +2,18 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Form.io Renderer (BC iframe)</title>
+  <title>Form.io Renderer with Client Submit</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <link rel="stylesheet" href="/formio.full.min.css">
-
   <style>
     html,body { height:100%; margin:0; font-family:Segoe UI, Roboto, Arial, sans-serif; background:#fff; color:#111; }
     #root { box-sizing:border-box; padding:12px; height:100%; display:flex; flex-direction:column; gap:12px; }
     #status { font-size:13px; color:#666; }
     #error { color:#b00020; font-weight:600; display:none; }
     #formio { flex:1; min-height:200px; border:1px solid #e6e6e6; padding:8px; overflow:auto; background:#fafafa; }
-    pre { white-space:pre-wrap; word-break:break-word; background:#f5f5f5; padding:8px; border-radius:4px; }
+    #controls { display:flex; gap:8px; align-items:center; }
     button { padding:8px 12px; border-radius:4px; border:1px solid #ccc; background:#fff; cursor:pointer; }
+    pre { white-space:pre-wrap; word-break:break-word; background:#f5f5f5; padding:8px; border-radius:4px; }
+    #debug { display:none; max-height:200px; overflow:auto; }
   </style>
 </head>
 <body>
@@ -21,7 +21,11 @@
     <div id="status">Waiting for JSON from parent...</div>
     <div id="error" role="alert" aria-live="polite"></div>
     <div id="formio" aria-live="polite"></div>
-    <div id="debug" style="display:none"><pre id="debugPre"></pre></div>
+    <div id="controls">
+      <button id="manualSubmit" type="button" style="display:none">Submit</button>
+      <div id="submitHint" style="color:#666;font-size:13px"></div>
+    </div>
+    <div id="debug"><pre id="debugPre"></pre></div>
   </div>
 
   <script>
@@ -30,23 +34,33 @@
     const errorEl = document.getElementById('error');
     const formContainer = document.getElementById('formio');
     const debugPre = document.getElementById('debugPre');
+    const debugBox = document.getElementById('debug');
+    const manualSubmitBtn = document.getElementById('manualSubmit');
+    const submitHint = document.getElementById('submitHint');
 
     function setStatus(t){ statusEl.textContent = t; }
     function showError(t){ errorEl.style.display=''; errorEl.textContent = t; }
-    function debug(t){ debugPre.textContent += t + '\\n'; document.getElementById('debug').style.display=''; }
+    function debug(t){ debugBox.style.display=''; debugPre.textContent += t + '\\n'; }
 
-    // Load script helper (tries local first, then CDN)
-    function loadScript(url){
-      return new Promise((resolve,reject)=>{
-        const s=document.createElement('script');
-        s.src=url; s.async=true;
-        s.onload=()=>resolve(url);
-        s.onerror=()=>reject(new Error('Failed to load '+url));
+    // CONFIGURE: set your Form.io submission endpoint and optional token here.
+    // Example submission URL: https://yourproject.form.io/yourform/submission
+    // If your form JSON already contains submission settings, you can leave FORMIO_SUBMISSION_URL null
+    const FORMIO_SUBMISSION_URL = null; // e.g. 'https://yourproject.form.io/yourform/submission'
+    const FORMIO_TOKEN = null; // e.g. 'Bearer xxxxx' or null
+
+    // Dynamic script loader
+    function loadScript(url) {
+      return new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = url;
+        s.async = true;
+        s.onload = () => resolve(url);
+        s.onerror = () => reject(new Error('Failed to load ' + url));
         document.head.appendChild(s);
       });
     }
 
-    async function ensureFormio(){
+    async function ensureFormio() {
       if (window.Formio) return;
       const candidates = [
         // Recommended: include a local copy in the same origin as this HTML (e.g., formio.full.min.js)
@@ -54,25 +68,55 @@
         // Fallback CDN (may be blocked by CSP in some BC environments)
         'https://cdn.form.io/formiojs/formio.full.min.js'
       ];
-      for (const url of candidates){
+      for (const url of candidates) {
         try {
           await loadScript(url);
           if (window.Formio) return;
-        } catch (e){
+        } catch (e) {
           debug('loadScript failed: ' + url + ' -> ' + e.message);
         }
       }
       throw new Error('Formio library not available. Add a local copy or allow CDN.');
     }
 
-    // Render form JSON (string or object)
-    async function renderForm(jsonText){
-      formContainer.innerHTML=''; errorEl.style.display='none';
+    // Helper to post messages to parent
+    function postToParent(obj) {
+      try {
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage(obj, '*');
+        }
+      } catch (e) {
+        debug('postToParent error: ' + e.message);
+      }
+    }
+
+    // Submit to Form.io server using fetch
+    async function submitToFormioEndpoint(submissionData, submissionUrl) {
+      const url = submissionUrl || FORMIO_SUBMISSION_URL;
+      if (!url) throw new Error('No Form.io submission URL configured.');
+      const headers = { 'Content-Type': 'application/json' };
+      if (FORMIO_TOKEN) headers['Authorization'] = FORMIO_TOKEN;
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: headers,
+        body: JSON.stringify({ data: submissionData })
+      });
+      if (!resp.ok) {
+        const text = await resp.text().catch(()=>null);
+        throw new Error('Form.io submit failed: ' + resp.status + ' ' + resp.statusText + (text ? ' - ' + text : ''));
+      }
+      return resp.json();
+    }
+
+    // Render form JSON using Formio and wire submit
+    async function renderFormFromJson(jsonText) {
+      formContainer.innerHTML = '';
+      errorEl.style.display = 'none';
       setStatus('Parsing JSON...');
       let formJson;
       try {
-        formJson = (typeof jsonText === 'string') ? JSON.parse(jsonText) : jsonText;
-      } catch (e){
+        formJson = typeof jsonText === 'string' ? JSON.parse(jsonText) : jsonText;
+      } catch (e) {
         showError('Invalid JSON: ' + e.message);
         return;
       }
@@ -80,7 +124,7 @@
       setStatus('Loading Formio library...');
       try {
         await ensureFormio();
-      } catch (e){
+      } catch (e) {
         showError(e.message);
         return;
       }
@@ -89,28 +133,84 @@
       try {
         Formio.createForm(formContainer, formJson)
           .then(form => {
-            setStatus('Form rendered. Waiting for submit...');
-            form.on('submit', submission => {
-              try {
-                const payload = JSON.stringify(submission.data);
-                // Post submission back to parent
-                if (window.parent && window.parent !== window) {
-                  window.parent.postMessage({ type: 'MessageFromJs', message: payload }, '*');
-                }
-              } catch (err) {
-                debug('submit error: ' + err.message);
-              }
+            setStatus('Form rendered. Wiring submit...');
+
+            // If the form has a submission URL in its settings, use it; otherwise use configured constant
+            const formSubmissionUrl = (formJson && formJson.settings && formJson.settings.submitUrl) ? formJson.settings.submitUrl : null;
+
+            // When Form.io completes its normal submit flow (submitDone), forward result to parent
+            form.on('submitDone', (submission) => {
+              debug('submitDone event: ' + JSON.stringify(submission.data || {}));
+              postToParent({ type: 'formio-submission-success', payload: submission.data || {} });
             });
+
+            // Intercept submit event to perform client-side POST to Form.io server
+            form.on('submit', (submission) => {
+              debug('submit event captured (before remote save).');
+              // Prevent Form.io's default remote save by handling our own fetch
+              // Note: returning false may not stop internal behavior in all versions; we will perform our own fetch and post result to parent.
+              const data = submission.data || {};
+              setStatus('Submitting to Form.io server...');
+              // Use configured URL precedence: formJson.settings.submitUrl -> FORMIO_SUBMISSION_URL -> error
+              const submissionUrl = formSubmissionUrl || FORMIO_SUBMISSION_URL;
+              if (!submissionUrl) {
+                // No remote endpoint configured; just forward data to parent
+                setStatus('No Form.io endpoint configured. Sending data to parent.');
+                postToParent({ type: 'formio-submission', payload: data });
+                return;
+              }
+
+              // Perform fetch to Form.io endpoint
+              submitToFormioEndpoint(data, submissionUrl)
+                .then(result => {
+                  setStatus('Submission saved to Form.io.');
+                  postToParent({ type: 'formio-submission-success', payload: result });
+                })
+                .catch(err => {
+                  console.error('submitToFormioEndpoint error', err);
+                  setStatus('Submission failed.');
+                  showError('Submit error: ' + (err && err.message ? err.message : String(err)));
+                  // Also forward failure to parent so AL can decide what to do
+                  postToParent({ type: 'formio-submission-failed', error: String(err), payload: data });
+                });
+            });
+
+            // Defensive: attach manual submit button if Form.io's button is not wired or blocked
+            setTimeout(() => {
+              try {
+                const btn = formContainer.querySelector('button[type="submit"], button[data-component="submit"]');
+                if (btn) {
+                  debug('Found submit button; attaching defensive handler.');
+                  manualSubmitBtn.style.display = 'none';
+                } else {
+                  debug('Submit button not found; showing manual submit control.');
+                  manualSubmitBtn.style.display = '';
+                  submitHint.textContent = 'Click Submit to send data to Form.io server.';
+                  manualSubmitBtn.onclick = () => {
+                    // call form.submit() to trigger the submit flow
+                    form.submit()
+                      .catch(err => {
+                        console.error('form.submit() error', err);
+                        showError('Submit error: ' + (err && err.message ? err.message : String(err)));
+                      });
+                  };
+                }
+              } catch (ex) {
+                debug('defensive submit handler error: ' + ex.message);
+              }
+            }, 250);
+
+            setStatus('Form ready. Fill and submit.');
           })
           .catch(err => {
             showError('Form.io createForm error: ' + (err && err.message ? err.message : String(err)));
           });
-      } catch (err){
+      } catch (err) {
         showError('Render error: ' + err.message);
       }
     }
 
-    // Message handler: accept JSON from parent (type "FromAL") or commands
+    // Message handling: accept JSON from parent (type "FromAL") or commands
     window.addEventListener('message', function (ev) {
       try {
         const data = ev && ev.data;
@@ -119,20 +219,32 @@
         // If parent sends the JSON payload
         if (data.type === 'FromAL' && data.message) {
           setStatus('JSON received from parent. Rendering...');
-          renderForm(data.message);
+          renderFormFromJson(data.message);
           return;
         }
 
         // Optional: direct render command
         if (data.type === 'render-json' && data.payload) {
           setStatus('Render command received.');
-          renderForm(data.payload);
+          renderFormFromJson(data.payload);
           return;
         }
 
         // Optional: enable debug
         if (data.type === 'debug' && data.payload === true) {
-          document.getElementById('debug').style.display = '';
+          debugBox.style.display = '';
+          return;
+        }
+
+        // Optional: parent can set submission URL or token at runtime
+        if (data.type === 'set-submission-config') {
+          if (data.submissionUrl) {
+            // Note: in this simple example we do not re-render automatically
+            debug('Submission URL set by parent: ' + data.submissionUrl);
+          }
+          if (data.token) {
+            debug('Token set by parent.');
+          }
           return;
         }
       } catch (e) {
@@ -141,7 +253,7 @@
     }, false);
 
     // On load, notify parent that iframe is ready (so parent can send JSON)
-    function notifyParentReady(){
+    function notifyParentReady() {
       try {
         if (window.parent && window.parent !== window) {
           window.parent.postMessage({ type: 'iframe-ready' }, '*');
@@ -155,7 +267,7 @@
     }
 
     // Expose direct API for debugging or direct calls
-    window.__renderFormFromJson = renderForm;
+    window.__renderFormFromJson = renderFormFromJson;
 
     // Kick off
     setStatus('HTML loaded. Requesting JSON from parent...');
@@ -164,4 +276,3 @@
   </script>
 </body>
 </html>
-
