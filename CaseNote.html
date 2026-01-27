@@ -247,7 +247,15 @@
           renderFormFromJson(data.message);
           return;
         }
-
+          // Optional: if AL sends JSON, prefill the form
+          try {
+            const obj = JSON.parse(data.message);
+            form.submission = { data: obj };
+            form.redraw();
+            log("Prefilled form from AL JSON.");
+          } catch (e) {
+            // ignore if it's not JSON
+          }
         if (data.type === 'render-json' && data.payload) {
           setStatus('Render command received.');
           renderFormFromJson(data.payload);
