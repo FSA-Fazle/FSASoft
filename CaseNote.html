@@ -222,14 +222,14 @@
         // --- handle PrefillForm messages from parent ---
         if (data.type === 'PrefillForm' && data.payload !== undefined) {
           // Optional: if AL sends JSON, prefill the form
-          try {
-            const obj = JSON.parse(data.message);
-            form.submission = { data: obj };
-            form.redraw();
-            setStatus('Prefill message received.');
-          } catch (e) {
-            // ignore if it's not JSON
-          }
+          //try {
+          //  const obj = JSON.parse(data.message);
+          //  form.submission = { data: obj };
+          //  form.redraw();
+          //  setStatus('Prefill message received.');
+          //} catch (e) {
+          //  // ignore if it's not JSON
+          //}
           setStatus('Prefill message received.');
           let payloadObj = null;
           try {
