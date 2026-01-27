@@ -44,6 +44,24 @@
 
     const FORMIO_TOKEN = null; // set if needed
 
+    // --- Prefill state and helper (ADDED) ---
+    let currentForm = null;
+    let pendingPrefill = null;
+
+    function applyPrefillToForm(form, payload) {
+      try {
+        if (!form || !payload) return;
+        // Form.io expects submission object with data property
+        form.submission = { data: payload };
+        // Redraw to ensure UI updates
+        if (typeof form.redraw === 'function') form.redraw();
+        debug('Prefill applied: ' + JSON.stringify(payload));
+      } catch (e) {
+        debug('Prefill apply error: ' + e.message);
+      }
+    }
+    // ------------------------------------------------
+
     function loadScript(url) {
       return new Promise((resolve, reject) => {
         const s = document.createElement('script');
@@ -105,10 +123,19 @@
       try {
         Formio.createForm(formContainer, formJson)
           .then(form => {
+            // Save reference so prefill messages can be applied later
+            currentForm = form;
+
             setStatus('Form rendered. Wiring submit...');
 
             if (FORMIO_TOKEN && typeof Formio.setToken === 'function') {
               Formio.setToken(FORMIO_TOKEN);
+            }
+
+            // If a prefill was queued before the form was ready, apply it now
+            if (pendingPrefill) {
+              applyPrefillToForm(currentForm, pendingPrefill);
+              pendingPrefill = null;
             }
 
             // 1) Send submission JSON to parent as soon as user submits
@@ -191,28 +218,30 @@
       try {
         const data = ev && ev.data;
         if (!data) return;
-      // --- NEW: handle PrefillForm messages from parent ---
-      if (data.type === 'PrefillForm' && data.payload !== undefined) {
-        setStatus('Prefill message received.');
-        let payloadObj = null;
-        try {
-          payloadObj = typeof data.payload === 'string' ? JSON.parse(data.payload) : data.payload;
-        } catch (e) {
-          debug('Prefill JSON parse error: ' + e.message);
-          showError('Prefill JSON invalid: ' + e.message);
+
+        // --- handle PrefillForm messages from parent ---
+        if (data.type === 'PrefillForm' && data.payload !== undefined) {
+          setStatus('Prefill message received.');
+          let payloadObj = null;
+          try {
+            payloadObj = typeof data.payload === 'string' ? JSON.parse(data.payload) : data.payload;
+          } catch (e) {
+            debug('Prefill JSON parse error: ' + e.message);
+            showError('Prefill JSON invalid: ' + e.message);
+            return;
+          }
+
+          if (currentForm) {
+            applyPrefillToForm(currentForm, payloadObj);
+          } else {
+            pendingPrefill = payloadObj;
+            setStatus('Prefill queued until form is ready.');
+            debug('Prefill queued: ' + JSON.stringify(payloadObj));
+          }
           return;
         }
+        // -------------------------------------------------------
 
-        if (currentForm) {
-          applyPrefillToForm(currentForm, payloadObj);
-        } else {
-          pendingPrefill = payloadObj;
-          setStatus('Prefill queued until form is ready.');
-          debug('Prefill queued: ' + JSON.stringify(payloadObj));
-        }
-        return;
-      }
-      // -------------------------------------------------------
         if (data.type === 'FromAL' && data.message) {
           setStatus('JSON received from parent. Rendering...');
           renderFormFromJson(data.message);
