@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Form.io Renderer</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+      font-family: Segoe UI, Roboto, Arial, sans-serif;
+      background: #ffffff;
+    }
+    #root {
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      padding: 12px;
+      box-sizing: border-box;
+    }
+    #status {
+      font-size: 13px;
+      color: #666;
+      margin-bottom: 6px;
+    }
+    #error {
+      color: #b00020;
+      font-weight: 600;
+      display: none;
+      margin-bottom: 6px;
+    }
+    #formio {
+      flex: 1;
+      border: 1px solid #e6e6e6;
+      background: #fafafa;
+      padding: 8px;
+      overflow: auto;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="root">
+    <div id="status">Waiting for form JSON...</div>
+    <div id="error"></div>
+    <div id="formio"></div>
+  </div>
+
+  <script>
+    (function () {
+
+      const statusEl = document.getElementById('status');
+      const errorEl = document.getElementById('error');
+      const formContainer = document.getElementById('formio');
+
+      let currentForm = null;
+      let pendingPrefill = null;
+
+      function setStatus(text) {
+        statusEl.textContent = text;
+      }
+
+      function showError(text) {
+        errorEl.style.display = '';
+        errorEl.textContent = text;
+      }
+
+      function loadScript(url) {
+        return new Promise((resolve, reject) => {
+          const s = document.createElement('script');
+          s.src = url;
+          s.async = true;
+          s.onload = resolve;
+          s.onerror = () => reject(new Error('Failed to load ' + url));
+          document.head.appendChild(s);
+        });
+      }
+
+      async function ensureFormio() {
+        if (window.Formio) return;
+        await loadScript('https://cdn.form.io/formiojs/formio.full.min.js');
+      }
+
+      function applyPrefill(form, data) {
+        if (!form || !data) return;
+        form.submission = { data: data };
+        if (typeof form.redraw === 'function') {
+          form.redraw();
+        }
+        setStatus('Form prefilled.');
+      }
+
+      async function renderForm(formJsonText) {
+        formContainer.innerHTML = '';
+        errorEl.style.display = 'none';
+        setStatus('Loading Form.io...');
+
+        let formJson;
+        try {
+          formJson = typeof formJsonText === 'string'
+            ? JSON.parse(formJsonText)
+            : formJsonText;
+        } catch (e) {
+          showError('Invalid form JSON: ' + e.message);
+          return;
+        }
+
+        try {
+          await ensureFormio();
+        } catch (e) {
+          showError(e.message);
+          return;
+        }
+
+        setStatus('Rendering form...');
+
+        Formio.createForm(formContainer, formJson)
+          .then(form => {
+            currentForm = form;
+            setStatus('Form ready.');
+
+            if (pendingPrefill) {
+              applyPrefill(currentForm, pendingPrefill);
+              pendingPrefill = null;
+            }
+
+            form.on('submit', submission => {
+              window.parent.postMessage({
+                type: 'MessageFromJs',
+                message: JSON.stringify(submission.data || {})
+              }, '*');
+            });
+
+            form.on('submitError', err => {
+              showError('Submit error: ' + (err && err.message ? err.message : err));
+            });
+          })
+          .catch(err => {
+            showError('Form render error: ' + err.message);
+          });
+      }
+
+      window.addEventListener('message', function (event) {
+        const data = event.data || {};
+
+        // Render form schema
+        if (data.type === 'FromAL' && data.message) {
+          renderForm(data.message);
+          return;
+        }
+
+        // Prefill data
+        if (data.type === 'PrefillForm' && data.payload) {
+          let payload;
+          try {
+            payload = typeof data.payload === 'string'
+              ? JSON.parse(data.payload)
+              : data.payload;
+          } catch (e) {
+            showError('Invalid prefill JSON: ' + e.message);
+            return;
+          }
+
+          if (currentForm) {
+            applyPrefill(currentForm, payload);
+          } else {
+            pendingPrefill = payload;
+            setStatus('Prefill received, waiting for form...');
+          }
+        }
+      });
+
+      // Notify parent that iframe is ready
+      window.parent.postMessage({ type: 'iframe-ready' }, '*');
+      setStatus('Iframe ready. Waiting for form JSON...');
+
+    })();
+  </script>
+</body>
+</html>
